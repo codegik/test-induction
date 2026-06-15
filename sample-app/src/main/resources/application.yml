@@ -1,0 +1,10 @@
+server:
+  port: 9090
+
+payment:
+  # Point at the test-induction sidecar's mock-engine port for testing.
+  # For zero-impact "real" runs, set this to the real payment service URL.
+  base-url: http://localhost:8080
+  caller: payment-service
+  connect-timeout-ms: 2000
+  read-timeout-ms: 4000
