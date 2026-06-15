@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
 # ---------- build stage: compile + stage a self-contained app layout ----------
-FROM eclipse-temurin:21-jdk-jammy AS build
+FROM eclipse-temurin:25-jdk-jammy AS build
 
 ARG SBT_VERSION=1.10.7
 RUN apt-get update \
@@ -22,7 +22,7 @@ COPY src ./src
 RUN sbt stage
 
 # ---------- runtime stage: slim JRE, non-root ----------
-FROM eclipse-temurin:21-jre-jammy AS runtime
+FROM eclipse-temurin:25-jre-jammy AS runtime
 
 WORKDIR /app
 COPY --from=build /build/target/universal/stage/ ./

@@ -1,0 +1,8 @@
+# Build artifacts and IDE state — not needed in the image build context.
+target/
+.bloop/
+.metals/
+.settings/
+.classpath
+.project
+*.log

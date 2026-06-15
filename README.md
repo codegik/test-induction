@@ -81,18 +81,11 @@ Need a test induction strategy by following these requirements.
 
 Each folder has its own README with details.
 
-## Getting started
+## Running demonstration
 
 In three terminals:
 
 ```bash
-# 1) the sidecar  (single port :8080 — mock engine + /__induction control plane)
-cd test-induction && sbt run
-
-# 2) the sample app  (:9090)
-cd sample-app && mvn spring-boot:run
-
-# 3) register behaviors and exercise them end to end
 ./demo.sh
 ```
 
