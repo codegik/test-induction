@@ -37,13 +37,25 @@ info() { printf '   %s\n' "$*"; }
 # --- lifecycle ---------------------------------------------------------------
 kill_port() {
   local pid; pid=$(lsof -ti tcp:"$1" 2>/dev/null || true)
-  if [ -n "$pid" ]; then kill "$pid" 2>/dev/null || true; sleep 1; kill -9 "$pid" 2>/dev/null || true; fi
+  if [ -n "$pid" ]; then kill $pid 2>/dev/null || true; sleep 1; kill -9 $pid 2>/dev/null || true; fi
+}
+
+# Each app is launched in its own process group (setsid), so we can kill the
+# whole tree — the sbt/mvn launcher AND the forked JVM — not just the port holder.
+stop_group() { # pgid name port
+  local pgid=$1 name=$2 port=$3
+  [ -z "$pgid" ] && return 0
+  info "stopping $name"
+  kill -TERM -- "-$pgid" 2>/dev/null || true
+  sleep 1
+  kill -KILL -- "-$pgid" 2>/dev/null || true
+  kill_port "$port"          # belt and suspenders, in case anything escaped the group
 }
 
 cleanup() {
   say "shutting down"
-  [ -n "$APP_PID" ]  && { info "stopping sample-app"; kill_port "$APP_PORT"; }
-  [ -n "$SIDE_PID" ] && { info "stopping sidecar";    kill_port "$SIDE_PORT"; }
+  stop_group "$APP_PID"  "sample-app" "$APP_PORT"
+  stop_group "$SIDE_PID" "sidecar"    "$SIDE_PORT"
   info "logs kept in $LOGDIR"
 }
 trap cleanup EXIT
@@ -91,34 +103,42 @@ pay() { # profile label
   show_logs "$mark"
 }
 
+# Control-plane call with a short retry — just after startup the sidecar can
+# briefly refuse a connection, and under `set -e` a single failure would abort.
+ctl() { # METHOD PATH [DATA]
+  local method=$1 path=$2 data=${3:-} i
+  for i in 1 2 3 4 5 6; do
+    if [ -n "$data" ]; then
+      curl -fs -m 10 -X "$method" "$CONTROL$path" -H 'Content-Type: application/json' -d "$data" && return 0
+    else
+      curl -fs -m 10 -X "$method" "$CONTROL$path" && return 0
+    fi
+    sleep 1
+  done
+  echo "ERROR: control $method $CONTROL$path failed after retries" >&2
+  return 1
+}
+
 # --- 1) start both apps ------------------------------------------------------
 say "starting sidecar (:$SIDE_PORT) and sample-app (:$APP_PORT)"
 require_free "$SIDE_PORT"
 require_free "$APP_PORT"
 
-# Redirect stdin from /dev/null: the sidecar's build uses `connectInput := true`,
-# so a backgrounded `sbt run` reading the terminal would get SIGTTIN and stop.
-( cd "$ROOT/test-induction" && exec sbt -batch run ) > "$SIDE_LOG" 2>&1 < /dev/null &
+# setsid -> own process group (so cleanup can kill the whole tree).
+# stdin from /dev/null: the sidecar's build uses `connectInput := true`, so a
+# backgrounded `sbt run` reading the terminal would get SIGTTIN and stop.
+setsid bash -c "cd '$ROOT/test-induction' && exec sbt -batch run" > "$SIDE_LOG" 2>&1 < /dev/null &
 SIDE_PID=$!
 wait_up "$CONTROL/health" "sidecar"
 
-( cd "$ROOT/sample-app" && exec mvn -q spring-boot:run ) > "$APP_LOG" 2>&1 < /dev/null &
+setsid bash -c "cd '$ROOT/sample-app' && exec mvn -q spring-boot:run" > "$APP_LOG" 2>&1 < /dev/null &
 APP_PID=$!
 wait_up "$APP/pay" "sample-app"   # GET /pay -> 405, but proves it's listening
 
 # --- 2) register a mock ------------------------------------------------------
 say "register mock: profile '$PROFILE' -> 200 CONFIRMED for $TARGET/payments"
 mark=$(logmark)
-curl -s -X POST "$CONTROL/register" -H 'Content-Type: application/json' -d "{
-  \"profile\": \"$PROFILE\",
-  \"caller\":  \"$CALLER\",
-  \"behaviors\": [
-    { \"name\": \"payments\",
-      \"match\": { \"baseUrl\": \"$TARGET\", \"method\": \"POST\", \"path\": \"/payments\" },
-      \"response\": { \"status\": 200, \"headers\": { \"Content-Type\": \"application/json\" },
-                      \"jsonBody\": { \"paymentId\": \"pay_123\", \"status\": \"CONFIRMED\" } } }
-  ]
-}" >/dev/null
+ctl POST /register "{\"profile\":\"$PROFILE\",\"caller\":\"$CALLER\",\"behaviors\":[{\"name\":\"payments\",\"match\":{\"baseUrl\":\"$TARGET\",\"method\":\"POST\",\"path\":\"/payments\"},\"response\":{\"status\":200,\"headers\":{\"Content-Type\":\"application/json\"},\"jsonBody\":{\"paymentId\":\"pay_123\",\"status\":\"CONFIRMED\"}}}]}" >/dev/null
 info "registered"
 show_logs "$mark"
 
@@ -128,11 +148,14 @@ pay "$PROFILE" "call /pay WITH mock registered  ->  expect SUCCESS (served by si
 # --- 4) unregister the mock --------------------------------------------------
 say "unregister mock for profile '$PROFILE'"
 mark=$(logmark)
-curl -s -X DELETE "$CONTROL/$PROFILE/$CALLER" >/dev/null
+ctl DELETE "/$PROFILE/$CALLER" >/dev/null
 info "unregistered"
 show_logs "$mark"
 
 # --- 5) call again -> different result ---------------------------------------
 pay "$PROFILE" "call /pay AFTER unregister      ->  expect DIFFERENT result (no mock -> 404 upstream)"
 
-say "done — same request, different result before vs after unregister"
+# --- 6) call with NO profile -> bypasses the sidecar entirely ----------------
+pay "" "call /pay WITHOUT a profile     ->  bypasses sidecar, hits the REAL service (note: no sidecar logs below)"
+
+say "done — mock vs unregistered vs no-profile all give different results"
