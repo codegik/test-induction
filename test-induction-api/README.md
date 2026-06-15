@@ -1,4 +1,4 @@
-# test-induction (sidecar)
+# test-induction-api (sidecar)
 
 A test-induction **sidecar**, written in Scala 3 (sbt) with [WireMock](https://wiremock.org/)
 as the mock engine under the hood. It lets you inject failures into the external

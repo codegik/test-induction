@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>test-induction · mock manager</title>
+
+  <!-- Well-known modern stack, no build step: Tailwind CSS + Inter + Lucide icons. -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+  <script>
+    tailwind.config = {
+      darkMode: "class",
+      theme: { extend: { fontFamily: { sans: ["Inter", "ui-sans-serif", "system-ui", "sans-serif"] } } },
+    };
+  </script>
+
+  <!-- Reusable component classes via Tailwind @apply (idiomatic, keeps markup clean). -->
+  <style type="text/tailwindcss">
+    @layer components {
+      .card   { @apply rounded-2xl border border-slate-800 bg-slate-900/60 shadow-xl shadow-black/30; }
+      .btn    { @apply inline-flex items-center gap-2 rounded-lg px-3.5 py-2 text-sm font-medium transition focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-slate-950 disabled:opacity-50; }
+      .btn-primary { @apply bg-indigo-500 text-white hover:bg-indigo-400 focus:ring-indigo-500; }
+      .btn-ghost   { @apply bg-slate-800/70 text-slate-200 hover:bg-slate-700 focus:ring-slate-600; }
+      .btn-danger  { @apply bg-rose-500/10 text-rose-300 ring-1 ring-inset ring-rose-500/30 hover:bg-rose-500/20 focus:ring-rose-500; }
+      .label  { @apply block text-xs font-medium uppercase tracking-wide text-slate-400 mb-1.5; }
+      .input  { @apply w-full rounded-lg border border-slate-700 bg-slate-950/60 px-3 py-2 text-sm text-slate-100 placeholder-slate-500 transition focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500; }
+    }
+  </style>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+
+<body class="min-h-screen bg-slate-950 font-sans text-slate-200 antialiased">
+  <!-- Top bar -->
+  <header class="sticky top-0 z-10 border-b border-slate-800/80 bg-slate-950/80 backdrop-blur">
+    <div class="mx-auto flex h-16 max-w-6xl items-center justify-between px-4 sm:px-6">
+      <div class="flex items-center gap-3">
+        <span class="grid h-9 w-9 place-items-center rounded-xl bg-indigo-500/15 text-indigo-400 ring-1 ring-inset ring-indigo-500/30">
+          <i data-lucide="flask-conical" class="h-5 w-5"></i>
+        </span>
+        <div>
+          <h1 class="text-base font-semibold leading-tight text-white">test-induction</h1>
+          <p class="text-xs text-slate-400">mock manager</p>
+        </div>
+      </div>
+      <div class="flex items-center gap-2 sm:gap-3">
+        <span id="apiState" class="inline-flex items-center gap-2 rounded-full bg-slate-800/70 px-3 py-1.5 text-xs font-medium text-slate-300">
+          <span class="live-dot h-2 w-2 rounded-full bg-slate-500"></span>checking API…
+        </span>
+        <button id="refreshBtn" class="btn btn-ghost"><i data-lucide="refresh-cw" class="h-4 w-4"></i><span class="hidden sm:inline">Refresh</span></button>
+        <button id="resetBtn" class="btn btn-danger"><i data-lucide="trash-2" class="h-4 w-4"></i><span class="hidden sm:inline">Reset all</span></button>
+      </div>
+    </div>
+  </header>
+
+  <main class="mx-auto grid max-w-6xl grid-cols-1 gap-6 px-4 py-8 sm:px-6 lg:grid-cols-5">
+    <!-- Registered behaviors -->
+    <section class="lg:col-span-3">
+      <div class="card p-5 sm:p-6">
+        <div class="mb-1 flex items-center gap-2">
+          <i data-lucide="list-checks" class="h-5 w-5 text-indigo-400"></i>
+          <h2 class="text-lg font-semibold text-white">Registered behaviors</h2>
+        </div>
+        <p class="mb-5 text-sm text-slate-400">Grouped by <code class="rounded bg-slate-800 px-1 py-0.5 text-slate-300">profile</code> /
+          <code class="rounded bg-slate-800 px-1 py-0.5 text-slate-300">caller</code>. A request to the sidecar matches a
+          behavior on its full base-url + path + the induction headers.</p>
+        <div id="status"><p class="text-sm text-slate-500">Loading…</p></div>
+      </div>
+    </section>
+
+    <!-- Register a behavior -->
+    <section class="lg:col-span-2">
+      <div class="card sticky top-24 p-5 sm:p-6">
+        <div class="mb-1 flex items-center gap-2">
+          <i data-lucide="plus-circle" class="h-5 w-5 text-indigo-400"></i>
+          <h2 class="text-lg font-semibold text-white">Register a behavior</h2>
+        </div>
+        <p class="mb-5 text-sm text-slate-400">Registering again with the same profile/caller appends another behavior.</p>
+
+        <form id="regForm" class="space-y-4">
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="label" for="f-profile">Profile</label>
+              <input id="f-profile" class="input" name="profile" placeholder="payment-confirmed" required />
+            </div>
+            <div>
+              <label class="label" for="f-caller">Caller</label>
+              <input id="f-caller" class="input" name="caller" value="payment-service" required />
+            </div>
+          </div>
+
+          <div>
+            <label class="label" for="f-name">Name <span class="text-slate-500 normal-case">(optional)</span></label>
+            <input id="f-name" class="input" name="name" placeholder="payments" />
+          </div>
+
+          <div class="grid grid-cols-3 gap-3">
+            <div class="col-span-2">
+              <label class="label" for="f-baseUrl">Target base URL</label>
+              <input id="f-baseUrl" class="input" name="baseUrl" placeholder="http://api.payments.com" required />
+            </div>
+            <div>
+              <label class="label" for="f-method">Method</label>
+              <select id="f-method" class="input" name="method">
+                <option>POST</option><option>GET</option><option>PUT</option>
+                <option>DELETE</option><option>PATCH</option>
+              </select>
+            </div>
+          </div>
+
+          <div>
+            <label class="label" for="f-path">Path</label>
+            <input id="f-path" class="input" name="path" placeholder="/v1/charges" required />
+            <label class="mt-2 flex items-center gap-2 text-xs text-slate-400">
+              <input type="checkbox" name="pathIsPattern" class="h-4 w-4 rounded border-slate-600 bg-slate-900 text-indigo-500 focus:ring-indigo-500" />
+              path is a regex (<code class="rounded bg-slate-800 px-1 py-0.5 text-slate-300">pathPattern</code>)
+            </label>
+          </div>
+
+          <div>
+            <label class="label" for="f-response">Response <span class="text-slate-500 normal-case">(verbatim WireMock response JSON)</span></label>
+            <textarea id="f-response" class="input font-mono text-xs leading-relaxed" name="response" rows="9" spellcheck="false">{
+  "status": 200,
+  "headers": { "Content-Type": "application/json" },
+  "jsonBody": { "status": "CONFIRMED" }
+}</textarea>
+          </div>
+
+          <div>
+            <p class="mb-2 text-xs font-medium uppercase tracking-wide text-slate-500">Fault recipes</p>
+            <div class="flex flex-wrap gap-2">
+              <button type="button" class="chip rounded-full border border-slate-700 bg-slate-800/60 px-3 py-1 text-xs text-slate-300 transition hover:border-indigo-500 hover:text-white" data-recipe='{"status":500,"body":"upstream boom"}'>HTTP 500</button>
+              <button type="button" class="chip rounded-full border border-slate-700 bg-slate-800/60 px-3 py-1 text-xs text-slate-300 transition hover:border-indigo-500 hover:text-white" data-recipe='{"status":200,"fixedDelayMilliseconds":8000}'>Slow (8s)</button>
+              <button type="button" class="chip rounded-full border border-slate-700 bg-slate-800/60 px-3 py-1 text-xs text-slate-300 transition hover:border-indigo-500 hover:text-white" data-recipe='{"fault":"CONNECTION_RESET_BY_PEER"}'>Connection reset</button>
+              <button type="button" class="chip rounded-full border border-slate-700 bg-slate-800/60 px-3 py-1 text-xs text-slate-300 transition hover:border-indigo-500 hover:text-white" data-recipe='{"status":200,"headers":{"Content-Type":"application/json"},"body":"{ not valid json"}'>Malformed JSON</button>
+            </div>
+          </div>
+
+          <div class="flex items-center justify-between gap-3 pt-1">
+            <span id="formMsg" class="text-sm"></span>
+            <button type="submit" class="btn btn-primary"><i data-lucide="check" class="h-4 w-4"></i>Register</button>
+          </div>
+        </form>
+      </div>
+    </section>
+  </main>
+
+  <script src="/app.js"></script>
+</body>
+</html>

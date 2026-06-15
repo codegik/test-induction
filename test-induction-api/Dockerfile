@@ -39,4 +39,4 @@ USER induction
 HEALTHCHECK --interval=15s --timeout=3s --start-period=30s --retries=3 \
   CMD bash -c 'exec 3<>/dev/tcp/127.0.0.1/${INDUCTION_MOCK_PORT:-8080}' || exit 1
 
-ENTRYPOINT ["/app/bin/test-induction"]
+ENTRYPOINT ["/app/bin/test-induction-api"]

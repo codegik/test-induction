@@ -127,7 +127,7 @@ require_free "$APP_PORT"
 # setsid -> own process group (so cleanup can kill the whole tree).
 # stdin from /dev/null: the sidecar's build uses `connectInput := true`, so a
 # backgrounded `sbt run` reading the terminal would get SIGTTIN and stop.
-setsid bash -c "cd '$ROOT/test-induction' && exec sbt -batch run" > "$SIDE_LOG" 2>&1 < /dev/null &
+setsid bash -c "cd '$ROOT/test-induction-api' && exec sbt -batch run" > "$SIDE_LOG" 2>&1 < /dev/null &
 SIDE_PID=$!
 wait_up "$CONTROL/health" "sidecar"
 

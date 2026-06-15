@@ -1,19 +1,22 @@
-# Brings up the test-induction sidecar and the sample-app on one network.
-#
-#   docker compose up -d --build --wait
-#   ./demo-compose.sh        # full end-to-end demo against the compose stack
-#
-# The sample-app reaches the sidecar by its service name (`sidecar`), and proxies
-# its outbound payment calls there only when a request carries an induction
-# profile. Both ports are published so you can drive them from the host.
 services:
   sidecar:
     build:
-      context: ./test-induction
-    image: test-induction:latest
+      context: ./test-induction-api
+    image: test-induction-api:latest
     ports:
-      - "8080:8080"          # mock engine + /__induction control plane
-    # Healthcheck is defined in the image (TCP connect to :8080).
+      - "8080:8080"
+
+  ui:
+    build:
+      context: ./test-induction-ui
+    image: test-induction-ui:latest
+    ports:
+      - "8090:8090"
+    environment:
+      INDUCTION_API_BASEURL: http://sidecar:8080
+    depends_on:
+      sidecar:
+        condition: service_healthy
 
   sample-app:
     build:
@@ -22,9 +25,6 @@ services:
     ports:
       - "9090:9090"
     environment:
-      # Point the app's induction routing at the sidecar service. The app's
-      # real payment base-url (payment.base-url) is left at its default and is
-      # NOT changed — only proxied through here when a profile is active.
       INDUCTION_SIDECARHOST: sidecar
       INDUCTION_SIDECARPORT: "8080"
     depends_on:

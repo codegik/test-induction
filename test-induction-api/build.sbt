@@ -5,7 +5,7 @@ ThisBuild / version      := "0.1.0"
 lazy val root = (project in file("."))
   .enablePlugins(JavaAppPackaging)
   .settings(
-    name := "test-induction",
+    name := "test-induction-api",
     libraryDependencies ++= Seq(
       // WireMock is the mock engine under the hood. We use the non-standalone
       // artifact so its Jackson dependency is available on the classpath for us

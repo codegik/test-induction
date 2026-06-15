@@ -1,7 +1,7 @@
 # sample-app
 
 A Java 25 + Spring Boot (Maven) service that calls an external **payment** API,
-demonstrating the `../test-induction` sidecar.
+demonstrating the `../test-induction-api` sidecar.
 
 It exposes `POST /pay`, which calls the **real** payment API at `payment.base-url`
 — the same URL in every environment. When the inbound `/pay` request carries an
@@ -55,7 +55,7 @@ mvn spring-boot:run
 
 ## Demo
 
-With the sidecar running (`cd ../test-induction && sbt run`) and behaviors
+With the sidecar running (`cd ../test-induction-api && sbt run`) and behaviors
 registered, run `../demo.sh`, or manually:
 
 ```bash
