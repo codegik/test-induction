@@ -1,12 +1,14 @@
 package induction
 
 import com.fasterxml.jackson.databind.{JsonNode, ObjectMapper}
-import com.fasterxml.jackson.databind.node.ObjectNode
+import com.fasterxml.jackson.databind.node.{ArrayNode, ObjectNode}
 import com.github.tomakehurst.wiremock.client.ResponseDefinitionBuilder
 import com.github.tomakehurst.wiremock.extension.requestfilter.{RequestFilterAction, StubRequestFilterV2}
 import com.github.tomakehurst.wiremock.http.{Request, ResponseDefinition}
 import com.github.tomakehurst.wiremock.stubbing.ServeEvent
 import org.slf4j.LoggerFactory
+
+import scala.jdk.CollectionConverters.*
 
 /** The control plane, folded into the mock engine's own HTTP port as a WireMock
   * request filter. This is what lets the sidecar expose a single port: requests
@@ -67,22 +69,59 @@ final class InductionControlFilter(engine: MockEngine) extends StubRequestFilter
     json(404, errJson(s"no route for $method $path"))
 
   private def register(request: Request): ResponseDefinition =
-    val root    = mapper.readTree(request.getBodyAsString)
-    val profile = requireText(root, "profile")
-    val caller  = requireText(root, "caller")
-    val mapping = root.get("mapping") match
+    val root      = mapper.readTree(request.getBodyAsString)
+    val profile   = requireText(root, "profile")
+    val caller    = requireText(root, "caller")
+    val behaviors = root.get("behaviors") match
+      case a: ArrayNode if !a.isEmpty => a.asScala.toList.map(behaviorSpec)
+      case _ => throw new IllegalArgumentException("'behaviors' (a non-empty array) is required")
+    val ids = engine.register(profile, caller, behaviors)
+
+    val resp  = mapper.createObjectNode()
+    resp.put("profile", profile)
+    resp.put("caller", caller)
+    val stubs = resp.putArray("stubIds")
+    ids.foreach(stubs.add)
+    json(201, mapper.writeValueAsString(resp))
+
+  /** Parse one element of `behaviors`: a `match` (baseUrl/method/path|pathPattern)
+    * plus a verbatim WireMock `response`.
+    */
+  private def behaviorSpec(node: JsonNode): BehaviorSpec =
+    val m = node.get("match") match
       case o: ObjectNode => o
-      case _ => throw new IllegalArgumentException("'mapping' (a WireMock stub mapping) is required")
-    val id = engine.register(profile, caller, mapping)
-    json(201, s"""{"profile":"$profile","caller":"$caller","stubId":"$id"}""")
+      case _ => throw new IllegalArgumentException("each behavior needs a 'match' object")
+    val response = node.get("response") match
+      case r: JsonNode if r != null && !r.isNull => r
+      case _ => throw new IllegalArgumentException("each behavior needs a 'response' object")
+    val (path, isPattern) = m.get("pathPattern") match
+      case p: JsonNode if p != null && !p.isNull && !p.asText.isBlank => (p.asText, true)
+      case _                                                          => (requireText(m, "path"), false)
+    BehaviorSpec(
+      name          = Option(node.get("name")).map(_.asText).filter(!_.isBlank).getOrElse(s"${requireText(m, "method")} ${requireText(m, "baseUrl")}"),
+      baseUrl       = requireText(m, "baseUrl"),
+      method        = requireText(m, "method"),
+      path          = path,
+      pathIsPattern = isPattern,
+      response      = response
+    )
 
   private def status(): ResponseDefinition =
+    // Group flat registrations by (profile, caller) and nest their behaviors.
     val arr = mapper.createArrayNode()
-    engine.status.foreach { r =>
+    engine.status.groupBy(r => (r.profile, r.caller)).foreach { case ((profile, caller), regs) =>
       val o = arr.addObject()
-      o.put("profile", r.profile)
-      o.put("caller", r.caller)
-      o.put("stubId", r.stubId)
+      o.put("profile", profile)
+      o.put("caller", caller)
+      val behaviors = o.putArray("behaviors")
+      regs.foreach { r =>
+        val b = behaviors.addObject()
+        b.put("name", r.name)
+        b.put("baseUrl", r.baseUrl)
+        b.put("method", r.method)
+        b.put("path", r.path)
+        b.put("stubId", r.stubId)
+      }
     }
     json(200, mapper.writeValueAsString(arr))
 

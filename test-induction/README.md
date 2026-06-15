@@ -28,38 +28,52 @@ A single HTTP listener (default `:8080`) serves two planes:
   toggle behaviors. The reserved prefix mirrors WireMock's own `/__admin`, so it
   can never shadow a stub you register.
 
-You register a behavior as a **WireMock stub mapping** (we wrap WireMock's own
-format rather than reinventing it), wrapped in an envelope that names the
-`profile` and `caller`:
+A **profile** is a named scenario containing a list of **behaviors** — one per
+external service the app calls. Each behavior is keyed by the target's **full
+base URL** plus its method and path, and carries a verbatim **WireMock response**
+(we wrap WireMock's own response format rather than reinventing it):
 
 ```json
 {
-  "profile": "payment-timeout",
+  "profile": "black-friday-meltdown",
   "caller":  "payment-service",
-  "mapping": {
-    "request":  { "method": "POST", "urlPath": "/payments" },
-    "response": { "status": 200, "fixedDelayMilliseconds": 8000,
-                  "jsonBody": { "paymentId": "slow", "status": "CONFIRMED" } }
-  }
+  "behaviors": [
+    {
+      "name":  "payments-slow",
+      "match": { "baseUrl": "https://api.payments.com", "method": "POST", "path": "/v1/charges" },
+      "response": { "status": 200, "fixedDelayMilliseconds": 8000,
+                    "jsonBody": { "id": "ch_1", "status": "succeeded" } }
+    },
+    {
+      "name":  "inventory-down",
+      "match": { "baseUrl": "https://api.inventory.com", "method": "GET", "pathPattern": "/v2/stock/.*" },
+      "response": { "status": 503, "body": "service unavailable" }
+    }
+  ]
 }
 ```
 
-The sidecar injects header matchers for `x-induction-test-profile` and
-`x-induction-test-caller` into that mapping's request pattern. At request time
-the caller sends those two headers; WireMock matches and serves the behavior.
-The same engine therefore serves different behaviors per profile and per caller.
+For each behavior the sidecar expands `match.baseUrl` into `host` + `port`
+matchers (the scheme is ignored, so `http`/`https` don't have to be
+distinguished), turns `path`/`pathPattern` into a `urlPath`/`urlPathPattern`
+matcher, and injects `x-induction-test-profile` and `x-induction-test-caller`
+header matchers. The app calls its **real** service URLs and, when a profile is
+active, proxies those calls through the sidecar (so the absolute target URL is on
+the wire); the sidecar matches on base-url + path + profile + caller and serves
+the behavior. Unmatched requests get a terminal **404** — the sidecar never
+forwards to a real service.
 
 ## Control API
 
 All control endpoints live under `/__induction` on the mock engine port.
 
-| Method & path                            | Body                          | Purpose                                   |
-|------------------------------------------|-------------------------------|-------------------------------------------|
-| `POST /__induction/register`             | `{ profile, caller, mapping }`| Register a behavior. Returns the stub id. |
-| `DELETE /__induction/{profile}/{caller}` | —                             | Remove all behaviors for that pair.       |
-| `POST /__induction/reset`                | —                             | Remove every registered behavior.         |
-| `GET /__induction/status`                | —                             | List what's registered.                   |
-| `GET /__induction/health`                | —                             | Liveness check.                           |
+| Method & path                            | Body                             | Purpose                                       |
+|------------------------------------------|----------------------------------|-----------------------------------------------|
+| `POST /__induction/register`             | `{ profile, caller, behaviors }` | Register a profile's behaviors. Returns stub ids. |
+| `DELETE /__induction/{profile}/{caller}` | —                                | Remove all behaviors for that pair.           |
+| `POST /__induction/reset`                | —                                | Remove every registered behavior.             |
+| `GET /__induction/status`                | —                                | List what's registered (grouped by profile).  |
+| `GET /__induction/health`                | —                                | Liveness check.                               |
 
 ## Run
 
@@ -69,25 +83,23 @@ sbt run
 #   INDUCTION_MOCK_PORT  (default 8080)  — serves both the mock engine and /__induction
 ```
 
-## Example fault recipes (the `mapping` value)
+## Example fault recipes (each behavior's `response` value)
 
 ```jsonc
 // HTTP 500
-{ "request": { "method": "POST", "urlPath": "/payments" },
-  "response": { "status": 500, "body": "upstream boom" } }
+{ "status": 500, "body": "upstream boom" }
 
 // Slow response / read timeout (delay longer than the client's read timeout)
-{ "request": { "method": "POST", "urlPath": "/payments" },
-  "response": { "status": 200, "fixedDelayMilliseconds": 8000 } }
+{ "status": 200, "fixedDelayMilliseconds": 8000 }
 
 // Connection reset by peer
-{ "request": { "method": "POST", "urlPath": "/payments" },
-  "response": { "fault": "CONNECTION_RESET_BY_PEER" } }
+{ "fault": "CONNECTION_RESET_BY_PEER" }
 
 // Malformed JSON
-{ "request": { "method": "POST", "urlPath": "/payments" },
-  "response": { "status": 200, "headers": { "Content-Type": "application/json" },
-                "body": "{ this is : not valid json" } }
+{ "status": 200, "headers": { "Content-Type": "application/json" },
+  "body": "{ this is : not valid json" }
 ```
 
-See `../sample-app` for a Spring Boot service that drives all of these.
+Drop any of these in as the `response` of a behavior whose `match` names the
+target service. See `../sample-app` for a Spring Boot service that drives all of
+these, and `../demo.sh` for ready-to-run registrations.

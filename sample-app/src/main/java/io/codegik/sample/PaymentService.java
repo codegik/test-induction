@@ -33,9 +33,9 @@ public class PaymentService {
         this.client = client;
     }
 
-    public ResponseEntity<Map<String, Object>> charge(PayRequest request, String profile) {
+    public ResponseEntity<Map<String, Object>> charge(PayRequest request) {
         try {
-            PaymentResponse payment = client.charge(request, profile);
+            PaymentResponse payment = client.charge(request);
             return ResponseEntity.ok(body("SUCCESS", Map.of("payment", payment)));
 
         } catch (RestClientResponseException e) {

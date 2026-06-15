@@ -1,49 +1,54 @@
 package io.codegik.sample;
 
 import org.springframework.http.MediaType;
+import org.springframework.http.client.ClientHttpRequestFactory;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 
+import java.net.InetSocketAddress;
+import java.net.Proxy;
 import java.time.Duration;
 
 /**
- * Calls the external payment API. The base URL and timeouts come from
- * {@link PaymentProperties}; when pointed at the sidecar, the induction headers
- * cause the configured fault/behavior to be returned.
+ * Calls the external payment API at its <em>real</em> base URL ({@link
+ * PaymentProperties#baseUrl()}). Routing is transparent: when the inbound request
+ * carries an induction profile, the call is proxied through the sidecar (which
+ * mocks it); otherwise it goes straight to the real service. The business method
+ * never knows which happened.
  */
 @Component
 public class PaymentClient {
 
     private final RestClient restClient;
-    private final String caller;
 
-    public PaymentClient(PaymentProperties props) {
-        var factory = new SimpleClientHttpRequestFactory();
-        factory.setConnectTimeout(Duration.ofMillis(props.connectTimeoutMs()));
-        factory.setReadTimeout(Duration.ofMillis(props.readTimeoutMs()));
+    public PaymentClient(PaymentProperties payment, InductionProperties induction) {
+        ClientHttpRequestFactory direct = simpleFactory(payment, null);
+        ClientHttpRequestFactory viaSidecar = simpleFactory(payment, new Proxy(
+                Proxy.Type.HTTP,
+                new InetSocketAddress(induction.sidecarHost(), induction.sidecarPort())));
 
         this.restClient = RestClient.builder()
-                .baseUrl(props.baseUrl())
-                .requestFactory(factory)
+                .baseUrl(payment.baseUrl())
+                .requestFactory(new InductionRoutingRequestFactory(direct, viaSidecar))
+                .requestInterceptor(new InductionHeaderInterceptor(induction.caller()))
                 .build();
-        this.caller = props.caller();
     }
 
-    /**
-     * Charge a payment. {@code profile}, when non-blank, is forwarded as the
-     * induction profile header so the sidecar serves the matching behavior.
-     */
-    public PaymentResponse charge(PayRequest request, String profile) {
+    private static ClientHttpRequestFactory simpleFactory(PaymentProperties payment, Proxy proxy) {
+        var factory = new SimpleClientHttpRequestFactory();
+        factory.setConnectTimeout(Duration.ofMillis(payment.connectTimeoutMs()));
+        factory.setReadTimeout(Duration.ofMillis(payment.readTimeoutMs()));
+        if (proxy != null) {
+            factory.setProxy(proxy);
+        }
+        return factory;
+    }
+
+    public PaymentResponse charge(PayRequest request) {
         return restClient.post()
                 .uri("/payments")
                 .contentType(MediaType.APPLICATION_JSON)
-                .headers(headers -> {
-                    headers.add(InductionHeaders.CALLER, caller);
-                    if (profile != null && !profile.isBlank()) {
-                        headers.add(InductionHeaders.PROFILE, profile);
-                    }
-                })
                 .body(request)
                 .retrieve()
                 .body(PaymentResponse.class);

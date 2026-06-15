@@ -2,9 +2,16 @@ server:
   port: 9090
 
 payment:
-  # Point at the test-induction sidecar's mock-engine port for testing.
-  # For zero-impact "real" runs, set this to the real payment service URL.
-  base-url: http://localhost:8080
-  caller: payment-service
+  # The REAL external payment service URL — unchanged across environments.
+  # (For the local demo this stand-in isn't actually running, so a call with no
+  # induction profile fails fast, proving the sidecar is bypassed.)
+  base-url: http://localhost:9099
   connect-timeout-ms: 2000
   read-timeout-ms: 4000
+
+induction:
+  # Where the test-induction sidecar listens. Calls are proxied here ONLY when
+  # the inbound request carries an x-induction-test-profile header.
+  sidecar-host: localhost
+  sidecar-port: 8080
+  caller: payment-service
