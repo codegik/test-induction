@@ -1,0 +1,10 @@
+# Build artifacts and IDE/sbt state — never needed in the image build context.
+target/
+project/target/
+project/project/
+.bloop/
+.metals/
+project/.bloop/
+project/metals.sbt
+.idea/
+*.log

@@ -3,6 +3,7 @@ ThisBuild / organization := "io.codegik"
 ThisBuild / version      := "0.1.0"
 
 lazy val root = (project in file("."))
+  .enablePlugins(JavaAppPackaging)
   .settings(
     name := "test-induction",
     libraryDependencies ++= Seq(
