@@ -78,7 +78,7 @@ All control endpoints live under `/__induction` on the mock engine port.
 ## Run
 
 ```bash
-sbt run
+./run.sh
 # Port is configurable:
 #   INDUCTION_MOCK_PORT  (default 8080)  — serves both the mock engine and /__induction
 ```

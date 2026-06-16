@@ -84,13 +84,38 @@ Each folder has its own README with details.
 
 ## Running demonstration
 
-In three terminals:
-
 ```bash
 ./demo.sh
+or
+./demo-compose.sh
 ```
 
-`demo.sh` registers per-profile behaviors (success, HTTP 500, slow/timeout,
-connection reset, malformed JSON), then calls the app's `POST /pay` with the
-`x-induction-test-profile` header to trigger each one — and shows that with no
-header, nothing is induced (zero impact).
+`demo.sh` registers per-profile behaviors (success, HTTP 500, slow/timeout, connection reset, malformed JSON), then calls the app's `POST /pay` with the `x-induction-test-profile` header to trigger each one — and shows that with no header, nothing is induced (zero impact).
+
+### Example calls
+
+```bash
+# 1. Register a mock for the 'payment-confirmed' profile (sidecar control plane on :8080)
+curl -X POST http://localhost:8080/__induction/register \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "profile": "payment-confirmed",
+    "caller": "payment-service",
+    "behaviors": [{
+      "match": { "baseUrl": "http://localhost:9099", "method": "POST", "path": "/payments" },
+      "response": { "status": 200, "jsonBody": { "status": "CONFIRMED" } }
+    }]
+  }'
+
+# 2. Call the app WITH the profile header -> proxied through the sidecar, served the mock
+curl -X POST http://localhost:9090/pay \
+  -H 'Content-Type: application/json' \
+  -H 'x-induction-test-profile: payment-confirmed' \
+  -d '{"amount": 42.00, "currency": "USD"}'
+# -> {"outcome":"SUCCESS","payment":{"status":"CONFIRMED", ...}}
+
+# 3. Call WITHOUT the header -> bypasses the sidecar, hits the real service (zero impact)
+curl -X POST http://localhost:9090/pay \
+  -H 'Content-Type: application/json' \
+  -d '{"amount": 42.00, "currency": "USD"}'
+```

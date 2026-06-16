@@ -50,7 +50,7 @@ this for free.
 ## Run
 
 ```bash
-mvn spring-boot:run
+./run.sh
 ```
 
 ## Demo
