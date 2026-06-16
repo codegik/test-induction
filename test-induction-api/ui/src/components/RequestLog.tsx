@@ -23,21 +23,10 @@ export function RequestLog() {
     setEntries(Array.isArray(r.json) ? r.json : []);
   };
 
+  // Load once; the request log is refreshed manually via the Refresh button
+  // (no background polling).
   useEffect(() => {
     load();
-    // Poll for new requests, but not while the tab is in the background; refresh
-    // immediately when the tab becomes visible again.
-    const id = setInterval(() => {
-      if (!document.hidden) load();
-    }, 3000);
-    const onVisible = () => {
-      if (!document.hidden) load();
-    };
-    document.addEventListener("visibilitychange", onVisible);
-    return () => {
-      clearInterval(id);
-      document.removeEventListener("visibilitychange", onVisible);
-    };
   }, []);
 
   const filtered = useMemo(() => {
