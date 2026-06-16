@@ -226,6 +226,17 @@ class InductionIntegrationSuite extends munit.FunSuite:
     assert(resp.contains("no route"), resp)
   }
 
+  // --- routing: UI at root vs data plane ---------------------------------
+
+  test("a data-plane call to a root path is matched, not shadowed by the UI") {
+    // The UI is served at "/", but a request carrying the caller header is data
+    // plane and must still reach stub matching — even for the root path.
+    register("happy", "http://api.payments.com", "POST", "/", 200, """{"root":true}""")
+    val (code, body) = call("http://api.payments.com/", "happy")
+    assertEquals(code, 200)
+    assert(body.contains("root"), body)
+  }
+
   // --- observability -----------------------------------------------------
 
   test("the mock engine logs induced vs no-match with the target URL") {

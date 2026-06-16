@@ -1,24 +1,14 @@
 services:
+  # Single sidecar: mock engine + /__induction control plane + bundled UI,
+  # all on port 8080. UI at http://localhost:8080/__induction/ui/
   sidecar:
     build:
       context: ./test-induction-api
-    image: test-induction-api:latest
+    image: test-induction:latest
     ports:
       - "8080:8080"
     volumes:
       - induction-data:/data
-
-  ui:
-    build:
-      context: ./test-induction-ui
-    image: test-induction-ui:latest
-    ports:
-      - "8090:8090"
-    environment:
-      INDUCTION_API_BASEURL: http://sidecar:8080
-    depends_on:
-      sidecar:
-        condition: service_healthy
 
   sample-app:
     build:

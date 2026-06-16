@@ -74,12 +74,16 @@ Need a test induction strategy by following these requirements.
 
 ## Repository layout
 
-| Folder                | What it is                                                                                       |
-|-----------------------|--------------------------------------------------------------------------------------------------|
-| `test-induction-api/` | The sidecar — Scala 3 + sbt, wrapping WireMock. Registers/toggles induced behaviors over REST.   |
-| `test-induction-ui/`  | A web UI (React + TypeScript, Vite, served by Node) to manage behaviors; proxies to the API control plane. |
-| `sample-app/`         | A Java 25 + Spring Boot (Maven) service calling an external payment API through the sidecar.      |
+| Folder                   | What it is                                                                                       |
+|--------------------------|--------------------------------------------------------------------------------------------------|
+| `test-induction-api/`    | The sidecar — Scala 3 + sbt, wrapping WireMock. Mock engine + `/__induction` control plane + bundled UI, all on one port. |
+| `test-induction-api/ui/` | The React + TypeScript (Vite) UI source, built and bundled into the sidecar image (run with Vite for dev). |
+| `sample-app/`            | A Java 25 + Spring Boot (Maven) service calling an external payment API through the sidecar.      |
 
+The sidecar is a **single deployment unit**: one image, one process, one port
+(`8080`). The UI is served at the root — **http://localhost:8080/** — and the
+control-plane API lives under **`/__induction/*`** on the same port; the mock
+engine (data plane) handles proxied requests that carry the induction headers.
 Each folder has its own README with details.
 
 ## Running demonstration

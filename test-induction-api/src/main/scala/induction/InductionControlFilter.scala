@@ -10,16 +10,24 @@ import org.slf4j.LoggerFactory
 
 import scala.jdk.CollectionConverters.*
 
-/** The control plane, folded into the mock engine's own HTTP port as a WireMock
-  * request filter. This is what lets the sidecar expose a single port: requests
-  * under the reserved [[InductionControlFilter.Prefix]] namespace are handled
-  * here and short-circuited, while everything else falls through to normal stub
-  * matching (the data plane).
+/** The control plane (and UI host), folded into the mock engine's own HTTP port
+  * as a WireMock request filter. This is what lets the sidecar expose a single
+  * port. Routing for an incoming request:
   *
-  * The namespace is `/__induction` — chosen to mirror WireMock's own reserved
-  * `/__admin` so it can never shadow a stub a caller registers.
+  *   1. path under `/__induction/`         -> control plane (API), handled here
+  *   2. else, has the induction caller header -> data plane (real proxied mock
+  *      call), passed through to WireMock stub matching
+  *   3. else                                -> the bundled web UI (served here)
+  *
+  * So the UI lives at the root (`/`, `/assets/...`) and the API under
+  * `/__induction/`. The caller header is what distinguishes a browser hit on
+  * `/` from a proxied data-plane request to some external service's root path —
+  * real induction traffic always carries it (the stubs require it).
+  *
+  * The `/__induction` namespace mirrors WireMock's own reserved `/__admin`.
   *
   * Endpoints (all on the mock engine port):
+  *   - GET    /                                the bundled web UI (SPA + assets)
   *   - POST   /__induction/register            { profile, caller, behaviors } (create-only; 409 on duplicate match)
   *   - PUT    /__induction/update              { profile, caller, behaviors } (change existing; 404 if absent)
   *   - DELETE /__induction/{profile}/{caller}
@@ -41,26 +49,33 @@ final class InductionControlFilter(engine: MockEngine) extends StubRequestFilter
 
   override def filter(request: Request, serveEvent: ServeEvent): RequestFilterAction =
     val path = request.getUrl.takeWhile(_ != '?')
-    if !path.startsWith(Prefix) then RequestFilterAction.continueWith(request)
+    if path == Prefix || path.startsWith(Prefix + "/") then
+      RequestFilterAction.stopWith(control(request, path))
+    else if request.getHeader(InductionHeaders.Caller) != null then
+      RequestFilterAction.continueWith(request) // data plane -> WireMock stub matching
     else
-      val method = request.getMethod.value.toUpperCase
-      log.info("control {} {}", method, path)
-      val response =
-        try
-          path.split("/").filter(_.nonEmpty).toList match
-            case "__induction" :: rest => route(method, rest, request)
-            case _                      => notFound(method, path)
-        catch
-          case e: DuplicateMatchException =>
-            log.warn("control {} {} conflict: {}", method, path, e.getMessage)
-            json(409, errJson(e.getMessage))
-          case e: MockNotFoundException =>
-            log.warn("control {} {} not found: {}", method, path, e.getMessage)
-            json(404, errJson(e.getMessage))
-          case e: Throwable =>
-            log.warn("control {} {} failed: {}", method, path, e.getMessage)
-            json(400, errJson(e.getMessage))
-      RequestFilterAction.stopWith(response)
+      RequestFilterAction.stopWith(serveUi(path)) // the bundled UI
+
+  private def control(request: Request, path: String): ResponseDefinition =
+    val method = request.getMethod.value.toUpperCase
+    // The UI polls health/requests on a timer; log those at DEBUG so they don't
+    // spam the log, but keep mutations (register/update/delete/reset) at INFO.
+    if isPoll(method, path) then log.debug("control {} {}", method, path)
+    else log.info("control {} {}", method, path)
+    try
+      path.split("/").filter(_.nonEmpty).toList match
+        case "__induction" :: rest => route(method, rest, request)
+        case _                      => notFound(method, path)
+    catch
+      case e: DuplicateMatchException =>
+        log.warn("control {} {} conflict: {}", method, path, e.getMessage)
+        json(409, errJson(e.getMessage))
+      case e: MockNotFoundException =>
+        log.warn("control {} {} not found: {}", method, path, e.getMessage)
+        json(404, errJson(e.getMessage))
+      case e: Throwable =>
+        log.warn("control {} {} failed: {}", method, path, e.getMessage)
+        json(400, errJson(e.getMessage))
 
   private def route(method: String, rest: List[String], request: Request): ResponseDefinition =
     (method, rest) match
@@ -76,6 +91,10 @@ final class InductionControlFilter(engine: MockEngine) extends StubRequestFilter
       case ("DELETE", profile :: caller :: Nil) =>
         json(200, s"""{"removed":${engine.remove(profile, caller)}}""")
       case _ => notFound(method, s"$Prefix/${rest.mkString("/")}")
+
+  /** Routine read-only polls the UI issues on a timer (not worth logging at INFO). */
+  private def isPoll(method: String, path: String): Boolean =
+    method == "GET" && (path == s"$Prefix/health" || path == s"$Prefix/requests")
 
   private def notFound(method: String, path: String): ResponseDefinition =
     log.warn("no route for {} {}", method, path)
@@ -182,6 +201,37 @@ final class InductionControlFilter(engine: MockEngine) extends StubRequestFilter
       .withHeader("Content-Type", "application/json")
       .withBody(body)
       .build()
+
+  /** Serve the bundled React build (classpath `/web`) for a root-relative request
+    * path. `/` (and any extension-less route) serves index.html (SPA); existing
+    * files are served as-is; a missing file (with an extension) is a 404.
+    */
+  private def serveUi(path: String): ResponseDefinition =
+    val rel0 = path.stripPrefix("/")
+    val rel  = if rel0.isEmpty then "index.html" else rel0
+    Option(getClass.getResourceAsStream("/web/" + rel)) match
+      case Some(in) =>
+        val bytes = try in.readAllBytes() finally in.close()
+        ResponseDefinitionBuilder
+          .responseDefinition()
+          .withStatus(200)
+          .withHeader("Content-Type", contentType(rel))
+          .withBody(bytes)
+          .build()
+      case None =>
+        if rel.contains(".") then notFound("GET", "/" + rel) // a real missing asset
+        else serveUi("/")                                    // SPA route -> index.html
+
+  private def contentType(path: String): String =
+    if path.endsWith(".html") then "text/html; charset=utf-8"
+    else if path.endsWith(".js") then "text/javascript; charset=utf-8"
+    else if path.endsWith(".css") then "text/css; charset=utf-8"
+    else if path.endsWith(".json") then "application/json"
+    else if path.endsWith(".svg") then "image/svg+xml"
+    else if path.endsWith(".ico") then "image/x-icon"
+    else if path.endsWith(".woff2") then "font/woff2"
+    else if path.endsWith(".png") then "image/png"
+    else "application/octet-stream"
 
 object InductionControlFilter:
   /** Reserved control-plane path prefix on the mock engine port. */

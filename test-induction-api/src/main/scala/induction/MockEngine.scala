@@ -86,9 +86,12 @@ final class MockEngine(val mockPort: Int, store: RequestStore = RequestStore.inM
 
   // Every data-plane request reaching the mock engine is recorded (persisted to
   // the request store) and logged. A non-404 means a behavior fired; a 404 means
-  // nothing matched. Control-plane (/__induction) calls are skipped here.
+  // nothing matched. Only real induction traffic is recorded — identified by the
+  // caller header — so control-plane calls, the UI, and stray browser hits
+  // (favicon, "/", etc.) don't pollute the log.
   server.addMockServiceRequestListener { (request, response) =>
-    if !request.getUrl.startsWith(InductionControlFilter.Prefix) then
+    if request.getHeader(InductionHeaders.Caller) != null
+      && !request.getUrl.startsWith(InductionControlFilter.Prefix) then
       val profile = Option(request.getHeader(InductionHeaders.Profile)).getOrElse("-")
       val caller  = Option(request.getHeader(InductionHeaders.Caller)).getOrElse("-")
       val matched = response.getStatus != 404

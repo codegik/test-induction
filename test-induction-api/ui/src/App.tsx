@@ -32,7 +32,10 @@ export default function App() {
   useEffect(() => {
     ping();
     reload();
-    const id = setInterval(ping, 5000);
+    // Poll the health badge, but not while the tab is in the background.
+    const id = setInterval(() => {
+      if (!document.hidden) ping();
+    }, 5000);
     // Pick up changes made elsewhere (e.g. via curl) when returning to the tab.
     const onFocus = () => {
       if (!editingRef.current) reload();

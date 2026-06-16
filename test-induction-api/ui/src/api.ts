@@ -1,8 +1,8 @@
 import type { BehaviorSpec, Group, RequestEntry } from "./types";
 
-// All calls go to this server's /api, reverse-proxied to the sidecar control
-// plane — the browser never makes a cross-origin request.
-const BASE = "/api/__induction";
+// The control plane lives at /__induction on the same origin (the sidecar serves
+// both the UI and the API). In dev, Vite proxies /__induction to the sidecar.
+const BASE = "/__induction";
 
 export interface ApiResult<T = unknown> {
   ok: boolean;

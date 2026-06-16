@@ -8,3 +8,8 @@ project/.bloop/
 project/metals.sbt
 .idea/
 *.log
+
+# UI build artifacts (the image builds the UI fresh from ui/ sources).
+ui/node_modules/
+ui/dist/
+src/main/resources/web/

@@ -25,8 +25,19 @@ export function RequestLog() {
 
   useEffect(() => {
     load();
-    const id = setInterval(load, 3000);
-    return () => clearInterval(id);
+    // Poll for new requests, but not while the tab is in the background; refresh
+    // immediately when the tab becomes visible again.
+    const id = setInterval(() => {
+      if (!document.hidden) load();
+    }, 3000);
+    const onVisible = () => {
+      if (!document.hidden) load();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
   }, []);
 
   const filtered = useMemo(() => {

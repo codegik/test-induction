@@ -9,11 +9,14 @@ project/project/
 # Java / Maven
 *.class
 
-# Node / Vite (test-induction-ui)
+# Node / Vite (test-induction-api/ui)
 node_modules/
 dist/
 .vite/
 *.tsbuildinfo
+
+# Bundled UI build copied into the sidecar image at build time
+test-induction-api/src/main/resources/web/
 
 # H2 request store (test-induction-api)
 data/
