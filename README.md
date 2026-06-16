@@ -77,7 +77,7 @@ Need a test induction strategy by following these requirements.
 | Folder                | What it is                                                                                       |
 |-----------------------|--------------------------------------------------------------------------------------------------|
 | `test-induction-api/` | The sidecar — Scala 3 + sbt, wrapping WireMock. Registers/toggles induced behaviors over REST.   |
-| `test-induction-ui/`  | A small web UI (Scala 3 + vanilla JS) to manage behaviors; proxies to the API control plane.     |
+| `test-induction-ui/`  | A web UI (React + TypeScript, Vite, served by Node) to manage behaviors; proxies to the API control plane. |
 | `sample-app/`         | A Java 25 + Spring Boot (Maven) service calling an external payment API through the sidecar.      |
 
 Each folder has its own README with details.

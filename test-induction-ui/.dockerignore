@@ -1,7 +1,4 @@
-target/
-project/target/
-project/project/
-.bloop/
-.metals/
-.idea/
+node_modules
+dist
+.git
 *.log

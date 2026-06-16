@@ -20,7 +20,8 @@ import scala.jdk.CollectionConverters.*
   * `/__admin` so it can never shadow a stub a caller registers.
   *
   * Endpoints (all on the mock engine port):
-  *   - POST   /__induction/register            { profile, caller, mapping }
+  *   - POST   /__induction/register            { profile, caller, behaviors } (create-only; 409 on duplicate match)
+  *   - PUT    /__induction/update              { profile, caller, behaviors } (change existing; 404 if absent)
   *   - DELETE /__induction/{profile}/{caller}
   *   - POST   /__induction/reset
   *   - GET    /__induction/status
@@ -48,6 +49,12 @@ final class InductionControlFilter(engine: MockEngine) extends StubRequestFilter
             case "__induction" :: rest => route(method, rest, request)
             case _                      => notFound(method, path)
         catch
+          case e: DuplicateMatchException =>
+            log.warn("control {} {} conflict: {}", method, path, e.getMessage)
+            json(409, errJson(e.getMessage))
+          case e: MockNotFoundException =>
+            log.warn("control {} {} not found: {}", method, path, e.getMessage)
+            json(404, errJson(e.getMessage))
           case e: Throwable =>
             log.warn("control {} {} failed: {}", method, path, e.getMessage)
             json(400, errJson(e.getMessage))
@@ -56,6 +63,7 @@ final class InductionControlFilter(engine: MockEngine) extends StubRequestFilter
   private def route(method: String, rest: List[String], request: Request): ResponseDefinition =
     (method, rest) match
       case ("POST", "register" :: Nil) => register(request)
+      case ("PUT", "update" :: Nil)    => update(request)
       case ("POST", "reset" :: Nil) =>
         engine.reset(); json(200, """{"reset":true}""")
       case ("GET", "status" :: Nil) => status()
@@ -69,20 +77,30 @@ final class InductionControlFilter(engine: MockEngine) extends StubRequestFilter
     json(404, errJson(s"no route for $method $path"))
 
   private def register(request: Request): ResponseDefinition =
+    val (profile, caller, behaviors) = parseEnvelope(request)
+    respondWithIds(201, profile, caller, engine.register(profile, caller, behaviors))
+
+  private def update(request: Request): ResponseDefinition =
+    val (profile, caller, behaviors) = parseEnvelope(request)
+    respondWithIds(200, profile, caller, engine.update(profile, caller, behaviors))
+
+  /** Parse the shared `{ profile, caller, behaviors[] }` envelope. */
+  private def parseEnvelope(request: Request): (String, String, List[BehaviorSpec]) =
     val root      = mapper.readTree(request.getBodyAsString)
     val profile   = requireText(root, "profile")
     val caller    = requireText(root, "caller")
     val behaviors = root.get("behaviors") match
       case a: ArrayNode if !a.isEmpty => a.asScala.toList.map(behaviorSpec)
       case _ => throw new IllegalArgumentException("'behaviors' (a non-empty array) is required")
-    val ids = engine.register(profile, caller, behaviors)
+    (profile, caller, behaviors)
 
+  private def respondWithIds(status: Int, profile: String, caller: String, ids: List[String]): ResponseDefinition =
     val resp  = mapper.createObjectNode()
     resp.put("profile", profile)
     resp.put("caller", caller)
     val stubs = resp.putArray("stubIds")
     ids.foreach(stubs.add)
-    json(201, mapper.writeValueAsString(resp))
+    json(status, mapper.writeValueAsString(resp))
 
   /** Parse one element of `behaviors`: a `match` (baseUrl/method/path|pathPattern)
     * plus a verbatim WireMock `response`.
@@ -119,7 +137,8 @@ final class InductionControlFilter(engine: MockEngine) extends StubRequestFilter
         b.put("name", r.name)
         b.put("baseUrl", r.baseUrl)
         b.put("method", r.method)
-        b.put("path", r.path)
+        if r.pathIsPattern then b.put("pathPattern", r.path) else b.put("path", r.path)
+        b.set[ObjectNode]("response", r.response)
         b.put("stubId", r.stubId)
       }
     }

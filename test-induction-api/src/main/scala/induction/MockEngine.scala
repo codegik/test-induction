@@ -26,7 +26,10 @@ final case class BehaviorSpec(
     response: JsonNode
 )
 
-/** A registered behavior, surfaced by the status endpoint. */
+/** A registered behavior, surfaced by the status endpoint. Carries the verbatim
+  * WireMock `response` and the path/pattern flag so the UI can show and edit the
+  * full configuration, not just the match.
+  */
 final case class Registration(
     profile: String,
     caller: String,
@@ -34,8 +37,16 @@ final case class Registration(
     baseUrl: String,
     method: String,
     path: String,
+    pathIsPattern: Boolean,
+    response: JsonNode,
     stubId: String
 )
+
+/** A register attempt collided with an already-registered mock's match. */
+final class DuplicateMatchException(message: String) extends RuntimeException(message)
+
+/** An update referenced a mock that is not registered. */
+final class MockNotFoundException(message: String) extends RuntimeException(message)
 
 /** Wraps an embedded WireMock server. We never reimplement WireMock: each
   * behavior is turned into WireMock's own stub-mapping JSON. A behavior is keyed
@@ -81,6 +92,37 @@ final class MockEngine(val mockPort: Int):
 
   private def key(profile: String, caller: String): String = s"$profile::$caller"
 
+  /** Normalize a target into the (host, port, fullPath) actually matched by
+    * WireMock: the scheme is ignored (only host/port/path are matched), the host
+    * is lower-cased (hostnames are case-insensitive), the port falls back to the
+    * scheme default when absent, and any base path on `baseUrl` is folded into
+    * `path`. Inputs that differ only cosmetically (trailing slash, host case,
+    * how the base-url/path split is chosen) normalize to the same triple.
+    */
+  private def normalizedMatch(baseUrl: String, path: String): (String, Int, String) =
+    val uri    = URI.create(baseUrl)
+    val scheme = Option(uri.getScheme).map(_.toLowerCase).getOrElse("http")
+    val host   = Option(uri.getHost)
+      .getOrElse(throw new IllegalArgumentException(s"'baseUrl' must include a host: $baseUrl"))
+      .toLowerCase
+    val port   = uri.getPort match
+      case -1 => if scheme == "https" then 443 else 80
+      case p  => p
+    val basePath = Option(uri.getPath).filter(p => p.nonEmpty && p != "/").getOrElse("")
+    (host, port, basePath + path)
+
+  /** Identity of a mock within a (profile, caller): method + the *normalized*
+    * target + path. Two behaviors with the same identity would match the same
+    * request, so we forbid registering a duplicate (use [[update]] instead).
+    * Keying off the normalized form means cosmetic differences can't sneak a
+    * duplicate past the check.
+    */
+  private def matchKey(method: String, baseUrl: String, path: String, isPattern: Boolean): String =
+    val (host, port, fullPath) = normalizedMatch(baseUrl, path)
+    s"${method.toUpperCase}|$host:$port|${if isPattern then "~" else "="}$fullPath"
+  private def specKey(b: BehaviorSpec): String = matchKey(b.method, b.baseUrl, b.path, b.pathIsPattern)
+  private def entryKey(e: Entry): String       = matchKey(e.method, e.baseUrl, e.path, e.pathIsPattern)
+
   def start(): Unit =
     server.start()
     log.info("WireMock mock engine + control plane started on :{}", Integer.valueOf(mockPort))
@@ -91,21 +133,61 @@ final class MockEngine(val mockPort: Int):
 
   /** Register every behavior in a profile for (profile, caller). Each behavior is
     * expanded into a WireMock stub matching its target base URL, path, method and
-    * the injected profile/caller headers. Returns the created stub ids.
+    * the injected profile/caller headers. A behavior whose match already exists
+    * for that (profile, caller) — or is duplicated within the request — is
+    * rejected with [[DuplicateMatchException]] (change it via [[update]]).
+    * Validation runs before anything is added, so a rejected request leaves the
+    * registry untouched. Returns the created stub ids.
     */
   def register(profile: String, caller: String, behaviors: List[BehaviorSpec]): List[String] =
-    behaviors.map { spec =>
-      val stub = StubMapping.buildFrom(mapper.writeValueAsString(buildMapping(profile, caller, spec)))
-      server.addStubMapping(stub)
-      registry
-        .computeIfAbsent(key(profile, caller), _ => ConcurrentHashMap.newKeySet[Entry]())
-        .add(Entry(spec.name, spec.baseUrl, spec.method.toUpperCase, spec.path, stub))
-      log.info(
-        "registered behavior [profile={}, caller={}] {} {} ({}) stubId={}",
-        profile, caller, spec.method.toUpperCase, spec.baseUrl + spec.path, spec.name, stub.getId
-      )
-      stub.getId.toString
+    val incoming = behaviors.map(b => (b, specKey(b)))
+    incoming.map(_._2).groupBy(identity).collectFirst { case (mk, xs) if xs.sizeIs > 1 => mk }.foreach { mk =>
+      throw DuplicateMatchException(s"duplicate match within request: $mk")
     }
+    val existing = Option(registry.get(key(profile, caller)))
+      .map(_.asScala.iterator.map(entryKey).toSet)
+      .getOrElse(Set.empty)
+    incoming.find { case (_, mk) => existing.contains(mk) }.foreach { case (b, _) =>
+      throw DuplicateMatchException(
+        s"a mock already exists for [profile=$profile, caller=$caller] ${b.method.toUpperCase} ${b.baseUrl}${b.path} — use update")
+    }
+    behaviors.map(addStub(profile, caller, _))
+
+  /** Update existing behaviors in place. Each behavior is located by its match
+    * within (profile, caller) and its response/name are replaced. A behavior
+    * whose match is not registered is a [[MockNotFoundException]]. Validation
+    * runs before anything changes. Returns the new stub ids.
+    */
+  def update(profile: String, caller: String, behaviors: List[BehaviorSpec]): List[String] =
+    val set = Option(registry.get(key(profile, caller))).getOrElse(
+      throw MockNotFoundException(s"no mocks registered for [profile=$profile, caller=$caller]"))
+    val targets = behaviors.map { spec =>
+      val mk = specKey(spec)
+      val entry = set.asScala.find(e => entryKey(e) == mk).getOrElse(
+        throw MockNotFoundException(
+          s"no mock to update for [profile=$profile, caller=$caller] ${spec.method.toUpperCase} ${spec.baseUrl}${spec.path}"))
+      (spec, entry)
+    }
+    targets.map { case (spec, entry) =>
+      server.removeStubMapping(entry.stub)
+      set.remove(entry)
+      log.info("updating behavior [profile={}, caller={}] {} {}",
+        profile, caller, spec.method.toUpperCase, spec.baseUrl + spec.path)
+      addStub(profile, caller, spec)
+    }
+
+  /** Build a WireMock stub for one behavior, register it, and remember it. */
+  private def addStub(profile: String, caller: String, spec: BehaviorSpec): String =
+    val stub = StubMapping.buildFrom(mapper.writeValueAsString(buildMapping(profile, caller, spec)))
+    server.addStubMapping(stub)
+    registry
+      .computeIfAbsent(key(profile, caller), _ => ConcurrentHashMap.newKeySet[Entry]())
+      .add(Entry(spec.name, spec.baseUrl, spec.method.toUpperCase, spec.path, spec.pathIsPattern, spec.response, stub))
+    log.info(
+      "registered behavior [profile={}, caller={}] {} {} ({}) stubId={}",
+      profile, caller, spec.method.toUpperCase, spec.baseUrl + spec.path, spec.name, stub.getId
+    )
+    stub.getId.toString
 
   /** Turn a [[BehaviorSpec]] into a WireMock stub-mapping JSON: the base URL
     * becomes host/port matchers (scheme is intentionally ignored so http/https
@@ -114,17 +196,7 @@ final class MockEngine(val mockPort: Int):
     * right profile and caller.
     */
   private def buildMapping(profile: String, caller: String, spec: BehaviorSpec): ObjectNode =
-    val uri      = URI.create(spec.baseUrl)
-    val scheme   = Option(uri.getScheme).map(_.toLowerCase).getOrElse("http")
-    val host     = Option(uri.getHost).getOrElse(
-      throw new IllegalArgumentException(s"'baseUrl' must include a host: ${spec.baseUrl}")
-    )
-    // Port is still matched; when absent we fall back to the scheme's default.
-    val port     = uri.getPort match
-      case -1 => if scheme == "https" then 443 else 80
-      case p  => p
-    val basePath = Option(uri.getPath).filter(p => p.nonEmpty && p != "/").getOrElse("")
-    val fullPath = basePath + spec.path
+    val (host, port, fullPath) = normalizedMatch(spec.baseUrl, spec.path)
 
     val mapping = mapper.createObjectNode()
     val request = mapping.putObject("request")
@@ -163,10 +235,11 @@ final class MockEngine(val mockPort: Int):
       val profile = parts(0)
       val caller  = if parts.length > 1 then parts(1) else ""
       entries.asScala.toList.map { e =>
-        Registration(profile, caller, e.name, e.baseUrl, e.method, e.path, e.stub.getId.toString)
+        Registration(profile, caller, e.name, e.baseUrl, e.method, e.path, e.pathIsPattern, e.response, e.stub.getId.toString)
       }
     }
 
 object MockEngine:
   /** A registered behavior plus the WireMock stub backing it (for removal). */
-  private final case class Entry(name: String, baseUrl: String, method: String, path: String, stub: StubMapping)
+  private final case class Entry(name: String, baseUrl: String, method: String, path: String,
+                                 pathIsPattern: Boolean, response: JsonNode, stub: StubMapping)

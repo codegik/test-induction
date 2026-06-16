@@ -11,7 +11,7 @@ RUN mvn -B -q dependency:go-offline || true
 
 # Build the Spring Boot executable jar.
 COPY src ./src
-RUN mvn -B -q -DskipTests package
+RUN mvn -B -q package
 
 # ---------- runtime stage: slim JRE 25, non-root ----------
 FROM eclipse-temurin:25-jre-jammy AS runtime

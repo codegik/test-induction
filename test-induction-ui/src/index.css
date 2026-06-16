@@ -1,12 +1,7 @@
 /* Tailwind (loaded via CDN in index.html) does the heavy lifting; this file only
-   adds a few touches Tailwind utilities don't cover, plus a dark fallback in case
-   the CDN is unreachable. */
+   adds touches utilities don't cover, plus a dark fallback if the CDN is slow. */
 
-/* Dark fallback so the page never flashes white before Tailwind loads. */
 html, body { background-color: #020617; color: #e2e8f0; }
-
-body { -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
-
 ::selection { background: rgba(99, 102, 241, 0.35); }
 
 /* Subtle "live" pulse on the API-status dot. */

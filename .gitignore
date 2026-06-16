@@ -9,6 +9,12 @@ project/project/
 # Java / Maven
 *.class
 
+# Node / Vite (test-induction-ui)
+node_modules/
+dist/
+.vite/
+*.tsbuildinfo
+
 # Logs / tmp
 *.log
 .classpath

@@ -116,6 +116,41 @@ class InductionIntegrationSuite extends munit.FunSuite:
       Map(InductionHeaders.Profile -> "chaos", InductionHeaders.Caller -> "payment-service"))._1, 503)
   }
 
+  // --- create-only register + update -------------------------------------
+
+  test("register rejects a duplicate match -> 409") {
+    register("happy", "http://api.payments.com", "POST", "/v1/charges", 200, """{"status":"CONFIRMED"}""")
+    val (code, body) = register("happy", "http://api.payments.com", "POST", "/v1/charges", 200, """{"status":"AGAIN"}""")
+    assertEquals(code, 409)
+    assert(body.contains("already exists"), body)
+  }
+
+  test("register rejects a cosmetically-different duplicate match -> 409") {
+    register("happy", "http://api.payments.com", "POST", "/v1/charges", 200, """{"status":"CONFIRMED"}""")
+    // Same effective target: trailing slash on base-url, upper-case host, and the
+    // base-url/path split chosen differently — all normalize to the same matcher.
+    val (c1, _) = register("happy", "http://api.payments.com/", "POST", "/v1/charges", 200, """{"x":1}""")
+    assertEquals(c1, 409)
+    val (c2, _) = register("happy", "http://API.PAYMENTS.COM", "POST", "/v1/charges", 200, """{"x":1}""")
+    assertEquals(c2, 409)
+    val (c3, _) = register("happy", "http://api.payments.com/v1", "POST", "/charges", 200, """{"x":1}""")
+    assertEquals(c3, 409)
+  }
+
+  test("update replaces an existing behavior's response") {
+    register("happy", "http://api.payments.com", "POST", "/v1/charges", 200, """{"status":"CONFIRMED"}""")
+    val (uc, _) = updateMock("happy", "http://api.payments.com", "POST", "/v1/charges", 200, """{"status":"DECLINED"}""")
+    assertEquals(uc, 200)
+    val (_, body) = call("http://api.payments.com/v1/charges", "happy")
+    assert(body.contains("DECLINED"), body)
+  }
+
+  test("update a mock that does not exist -> 404") {
+    val (code, body) = updateMock("ghost", "http://api.payments.com", "POST", "/v1/charges", 200, """{"x":1}""")
+    assertEquals(code, 404)
+    assert(body.contains("no mock"), body)
+  }
+
   // --- lifecycle ---------------------------------------------------------
 
   test("delete removes a profile's behaviors") {
@@ -201,6 +236,17 @@ class InductionIntegrationSuite extends munit.FunSuite:
          |]}""".stripMargin
     post(s"$controlBase/__induction/register", body)
 
+  /** Update a single behavior (located by its match) with a new response. */
+  private def updateMock(profile: String, baseUrl: String, method: String, path: String,
+                         status: Int, jsonBody: String): (Int, String) =
+    val body =
+      s"""{ "profile":"$profile", "caller":"payment-service", "behaviors":[
+         |  { "name":"b",
+         |    "match":{"baseUrl":"$baseUrl","method":"$method","path":"$path"},
+         |    "response":{"status":$status,"headers":{"Content-Type":"application/json"},"jsonBody":$jsonBody} }
+         |]}""".stripMargin
+    put(s"$controlBase/__induction/update", body)
+
   /** A data-plane POST through the sidecar proxy, with profile + caller headers. */
   private def call(targetUrl: String, profile: String): (Int, String) =
     callRaw(targetUrl, "POST", Map(InductionHeaders.Profile -> profile, InductionHeaders.Caller -> "payment-service"))
@@ -220,6 +266,9 @@ class InductionIntegrationSuite extends munit.FunSuite:
 
   private def post(url: String, body: String): (Int, String) =
     send(HttpRequest.newBuilder(URI.create(url)).POST(BodyPublishers.ofString(body)).build())
+
+  private def put(url: String, body: String): (Int, String) =
+    send(HttpRequest.newBuilder(URI.create(url)).PUT(BodyPublishers.ofString(body)).build())
 
   private def send(req: HttpRequest): (Int, String) =
     val resp = direct.send(req, BodyHandlers.ofString())

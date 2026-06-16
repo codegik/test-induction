@@ -1,49 +1,34 @@
 # test-induction-ui
 
-A small web UI to manage the [`../test-induction-api`](../test-induction-api)
-sidecar's mock behaviors — list, register, delete and reset — without hand-writing
-`curl` calls.
+A React + TypeScript (Vite) single-page app for managing the sidecar's mock
+behaviors, served by Node.
 
-It is intentionally **segregated from the API** and runs on its own port. The
-server (Scala 3, JDK built-in HTTP server — no framework) does two things:
+The browser only ever talks to this server: everything under `/api` is
+reverse-proxied to the sidecar control plane (`/__induction/...`), so there's no
+CORS and the API URL is never baked into the page.
 
-- serves a single-page app (plain HTML/CSS/JS, no build step) on `/`;
-- reverse-proxies everything under `/api` to the API control plane, so the
-  browser only ever talks to this server (no CORS, no API URL in the page).
+- **Dev** (`./run.sh` → `npm run dev`): Vite dev server with hot reload; the
+  `/api` proxy is configured in `vite.config.ts`.
+- **Prod** (Docker): `npm run build` produces `dist/`, served by `server.mjs`
+  (Node built-ins only) which also proxies `/api`.
 
-```
-browser ──>  test-induction-ui  ──/api──>  test-induction-api  (/__induction/*)
-              (UI_PORT, 8090)               (INDUCTION_API_BASEURL, :8080)
-```
+## Configuration
 
-## Configuration (env)
-
-| Variable                 | Default                  | Meaning                                  |
-|--------------------------|--------------------------|------------------------------------------|
-| `UI_PORT`                | `8090`                   | Port the UI listens on.                  |
-| `INDUCTION_API_BASEURL`  | `http://localhost:8080`  | Base URL of the API (where `/__induction` lives). |
+| Env var                 | Default                 | Purpose                                   |
+|-------------------------|-------------------------|-------------------------------------------|
+| `UI_PORT`               | `8090`                  | Port this server listens on.              |
+| `INDUCTION_API_BASEURL` | `http://localhost:8080` | Sidecar control plane the UI proxies to.  |
 
 ## Run
 
 ```bash
-# with the API already running on :8080
-sbt run
-# then open http://localhost:8090
+./run.sh                      # dev server on :8090, proxying /api -> :8080
+# or production-style:
+npm install && npm run build && npm start
 ```
 
-Or via Docker / the repo-root `docker-compose.yml` (the compose file points
-`INDUCTION_API_BASEURL` at the `sidecar` service):
+## Stack
 
-```bash
-docker compose up -d --build
-# open http://localhost:8090
-```
-
-## What it does
-
-- **Registered behaviors** — live list (grouped by `profile` / `caller`) with a
-  per-profile delete and a global reset.
-- **Register a behavior** — form for `profile`, `caller`, target `baseUrl`,
-  `method`, `path` (or regex `pathPattern`) and a verbatim WireMock `response`
-  (with one-click fault recipes). Registering again for the same profile/caller
-  appends another behavior.
+- React 19 + TypeScript, built with Vite
+- Tailwind CSS (via CDN) + Inter, icons from `lucide-react`
+- `server.mjs`: dependency-free Node static server + `/api` reverse proxy
