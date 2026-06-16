@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Header } from "./components/Header";
 import { BehaviorList } from "./components/BehaviorList";
 import { RegisterForm } from "./components/RegisterForm";
+import { RequestLog } from "./components/RequestLog";
 import { deleteProfile, getHealth, getStatus, resetAll } from "./api";
 import type { Behavior, Group, Health } from "./types";
 
@@ -67,6 +68,9 @@ export default function App() {
         </section>
         <section className="lg:col-span-2">
           <RegisterForm editTarget={editTarget} onCancelEdit={() => setEditTarget(null)} onSaved={reload} />
+        </section>
+        <section className="lg:col-span-5">
+          <RequestLog />
         </section>
       </main>
     </>

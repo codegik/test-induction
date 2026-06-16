@@ -103,7 +103,7 @@ curl -X POST http://localhost:8080/__induction/register \
     "caller": "payment-service",
     "behaviors": [{
       "match": { "baseUrl": "http://localhost:9099", "method": "POST", "path": "/payments" },
-      "response": { "status": 200, "jsonBody": { "status": "CONFIRMED" } }
+      "response": { "status": 200, "headers": { "Content-Type": "application/json" }, "jsonBody": { "status": "CONFIRMED" } }
     }]
   }'
 

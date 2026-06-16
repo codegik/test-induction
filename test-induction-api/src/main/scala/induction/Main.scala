@@ -13,8 +13,9 @@ object Main:
 
   def main(args: Array[String]): Unit =
     val mockPort = sys.env.getOrElse("INDUCTION_MOCK_PORT", "8080").toInt
+    val dbPath   = sys.env.getOrElse("INDUCTION_DB_PATH", "data/requests")
 
-    val engine = new MockEngine(mockPort)
+    val engine = new MockEngine(mockPort, RequestStore.file(dbPath))
     engine.start()
 
     log.info("test-induction sidecar up on :{} (mock engine + /__induction control plane)",

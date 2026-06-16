@@ -5,6 +5,8 @@ services:
     image: test-induction-api:latest
     ports:
       - "8080:8080"
+    volumes:
+      - induction-data:/data
 
   ui:
     build:
@@ -30,3 +32,6 @@ services:
     depends_on:
       sidecar:
         condition: service_healthy
+
+volumes:
+  induction-data:

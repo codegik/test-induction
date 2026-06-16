@@ -15,6 +15,12 @@ dist/
 .vite/
 *.tsbuildinfo
 
+# H2 request store (test-induction-api)
+data/
+*.mv.db
+*.trace.db
+*.lock.db
+
 # Logs / tmp
 *.log
 .classpath

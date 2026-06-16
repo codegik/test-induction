@@ -11,6 +11,7 @@ lazy val root = (project in file("."))
       // artifact so its Jackson dependency is available on the classpath for us
       // to manipulate stub-mapping JSON before handing it to WireMock.
       "org.wiremock"   % "wiremock"        % "3.9.2",
+      "com.h2database" % "h2"              % "2.3.232",
       "ch.qos.logback" % "logback-classic" % "1.5.6",
       // Integration tests drive the running sidecar (control API + mock engine)
       // over real HTTP, so the only test dependency is the test framework itself.

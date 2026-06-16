@@ -1,4 +1,4 @@
-import type { BehaviorSpec, Group } from "./types";
+import type { BehaviorSpec, Group, RequestEntry } from "./types";
 
 // All calls go to this server's /api, reverse-proxied to the sidecar control
 // plane — the browser never makes a cross-origin request.
@@ -42,6 +42,8 @@ export const updateMock = (body: Envelope) => call("PUT", "/update", body);
 export const deleteProfile = (profile: string, caller: string) =>
   call("DELETE", `/${encodeURIComponent(profile)}/${encodeURIComponent(caller)}`);
 export const resetAll = () => call("POST", "/reset");
+export const getRequests = () => call<RequestEntry[]>("GET", "/requests");
+export const clearRequests = () => call("DELETE", "/requests");
 
 export const errorOf = (r: ApiResult): string => {
   const j = r.json as { error?: string } | null;

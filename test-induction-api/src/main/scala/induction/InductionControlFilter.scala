@@ -25,6 +25,8 @@ import scala.jdk.CollectionConverters.*
   *   - DELETE /__induction/{profile}/{caller}
   *   - POST   /__induction/reset
   *   - GET    /__induction/status
+  *   - GET    /__induction/requests           (recorded data-plane requests + responses)
+  *   - DELETE /__induction/requests           (clear the request log)
   *   - GET    /__induction/health
   */
 final class InductionControlFilter(engine: MockEngine) extends StubRequestFilterV2:
@@ -66,7 +68,10 @@ final class InductionControlFilter(engine: MockEngine) extends StubRequestFilter
       case ("PUT", "update" :: Nil)    => update(request)
       case ("POST", "reset" :: Nil) =>
         engine.reset(); json(200, """{"reset":true}""")
-      case ("GET", "status" :: Nil) => status()
+      case ("GET", "status" :: Nil)   => status()
+      case ("GET", "requests" :: Nil) => requests()
+      case ("DELETE", "requests" :: Nil) =>
+        engine.clearRequests(); json(200, """{"cleared":true}""")
       case ("GET", "health" :: Nil) => json(200, """{"status":"UP"}""")
       case ("DELETE", profile :: caller :: Nil) =>
         json(200, s"""{"removed":${engine.remove(profile, caller)}}""")
@@ -141,6 +146,23 @@ final class InductionControlFilter(engine: MockEngine) extends StubRequestFilter
         b.set[ObjectNode]("response", r.response)
         b.put("stubId", r.stubId)
       }
+    }
+    json(200, mapper.writeValueAsString(arr))
+
+  private def requests(): ResponseDefinition =
+    val arr = mapper.createArrayNode()
+    engine.serveEvents.foreach { r =>
+      val o = arr.addObject()
+      o.put("id", r.id)
+      o.put("loggedAt", r.loggedAt)
+      o.put("method", r.method)
+      o.put("url", r.url)
+      o.put("profile", r.profile)
+      o.put("caller", r.caller)
+      o.put("matched", r.matched)
+      o.put("status", r.status)
+      o.put("requestBody", r.requestBody)
+      o.put("responseBody", r.responseBody)
     }
     json(200, mapper.writeValueAsString(arr))
 

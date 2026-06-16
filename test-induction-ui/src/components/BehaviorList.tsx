@@ -1,15 +1,6 @@
 import { ListChecks, Pencil, Trash2 } from "lucide-react";
 import { behaviorUrl, type Behavior, type Group } from "../types";
-
-const METHOD_COLOR: Record<string, string> = {
-  GET: "bg-emerald-500/15 text-emerald-300 ring-emerald-500/30",
-  POST: "bg-indigo-500/15 text-indigo-300 ring-indigo-500/30",
-  PUT: "bg-amber-500/15 text-amber-300 ring-amber-500/30",
-  DELETE: "bg-rose-500/15 text-rose-300 ring-rose-500/30",
-  PATCH: "bg-fuchsia-500/15 text-fuchsia-300 ring-fuchsia-500/30",
-};
-const methodColor = (m: string) =>
-  METHOD_COLOR[(m || "").toUpperCase()] ?? "bg-slate-700/40 text-slate-300 ring-slate-600/40";
+import { methodColor } from "../method";
 
 interface Props {
   groups: Group[];

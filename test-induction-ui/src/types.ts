@@ -16,6 +16,19 @@ export interface Group {
 
 export type Health = "checking" | "up" | "down";
 
+export interface RequestEntry {
+  id: string;
+  loggedAt: string;
+  method: string;
+  url: string;
+  profile: string;
+  caller: string;
+  matched: boolean;
+  status: number;
+  requestBody: string;
+  responseBody: string;
+}
+
 /** What the register/update form emits (a single WireMock-style behavior). */
 export interface BehaviorSpec {
   name?: string;

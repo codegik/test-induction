@@ -151,6 +151,37 @@ class InductionIntegrationSuite extends munit.FunSuite:
     assert(body.contains("no mock"), body)
   }
 
+  // --- request log -------------------------------------------------------
+
+  test("the request log records data-plane calls with response + induction headers") {
+    register("happy", "http://api.payments.com", "POST", "/v1/charges", 200, """{"status":"CONFIRMED"}""")
+    call("http://api.payments.com/v1/charges", "happy")          // matched
+    call("http://api.payments.com/v1/charges", "ghost")          // no-match 404
+
+    val (code, body) = get(s"$controlBase/__induction/requests")
+    assertEquals(code, 200)
+    assert(body.contains("\"url\":\"http://api.payments.com/v1/charges\""), body)
+    assert(body.contains("\"profile\":\"happy\""), body)
+    assert(body.contains("\"matched\":true"), body)
+    assert(body.contains("\"matched\":false"), body)
+    assert(body.contains("CONFIRMED"), body)
+  }
+
+  test("control-plane calls are excluded from the request log") {
+    register("happy", "http://api.payments.com", "POST", "/v1/charges", 200, """{"status":"CONFIRMED"}""")
+    val (_, body) = get(s"$controlBase/__induction/requests")
+    assert(!body.contains("__induction"), body)
+  }
+
+  test("clearing the request log empties it but keeps behaviors") {
+    register("happy", "http://api.payments.com", "POST", "/v1/charges", 200, """{"status":"CONFIRMED"}""")
+    call("http://api.payments.com/v1/charges", "happy")
+    assertEquals(delete(s"$controlBase/__induction/requests")._1, 200)
+    assertEquals(get(s"$controlBase/__induction/requests")._2, "[]")
+    // behavior still registered -> still serves
+    assertEquals(call("http://api.payments.com/v1/charges", "happy")._1, 200)
+  }
+
   // --- lifecycle ---------------------------------------------------------
 
   test("delete removes a profile's behaviors") {

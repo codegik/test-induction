@@ -42,6 +42,20 @@ final case class Registration(
     stubId: String
 )
 
+/** A recorded data-plane request and the response the sidecar served for it. */
+final case class RequestLogEntry(
+    id: String,
+    loggedAt: String,
+    method: String,
+    url: String,
+    profile: String,
+    caller: String,
+    matched: Boolean,
+    status: Int,
+    requestBody: String,
+    responseBody: String
+)
+
 /** A register attempt collided with an already-registered mock's match. */
 final class DuplicateMatchException(message: String) extends RuntimeException(message)
 
@@ -59,7 +73,7 @@ final class MockNotFoundException(message: String) extends RuntimeException(mess
   * State lives in a [[ConcurrentHashMap]] so behaviors can be toggled at runtime
   * from multiple control threads without a restart.
   */
-final class MockEngine(val mockPort: Int):
+final class MockEngine(val mockPort: Int, store: RequestStore = RequestStore.inMemory()):
   import MockEngine.Entry
 
   private val log      = LoggerFactory.getLogger(getClass)
@@ -70,15 +84,26 @@ final class MockEngine(val mockPort: Int):
   private val control  = new InductionControlFilter(this)
   private val server   = new WireMockServer(options().port(mockPort).extensions(control))
 
-  // Every data-plane request reaching the mock engine is logged with the target
-  // URL and induction headers. This is the "what is being used" signal: a non-404
-  // means a behavior fired; a 404 means nothing matched for that profile/target.
-  // Control-plane (/__induction) calls are skipped here.
+  // Every data-plane request reaching the mock engine is recorded (persisted to
+  // the request store) and logged. A non-404 means a behavior fired; a 404 means
+  // nothing matched. Control-plane (/__induction) calls are skipped here.
   server.addMockServiceRequestListener { (request, response) =>
     if !request.getUrl.startsWith(InductionControlFilter.Prefix) then
       val profile = Option(request.getHeader(InductionHeaders.Profile)).getOrElse("-")
       val caller  = Option(request.getHeader(InductionHeaders.Caller)).getOrElse("-")
       val matched = response.getStatus != 404
+      store.insert(RequestLogEntry(
+        id           = java.util.UUID.randomUUID().toString,
+        loggedAt     = java.time.Instant.now().toString,
+        method       = request.getMethod.value,
+        url          = request.getAbsoluteUrl,
+        profile      = profile,
+        caller       = caller,
+        matched      = matched,
+        status       = response.getStatus,
+        requestBody  = Option(request.getBodyAsString).getOrElse(""),
+        responseBody = Option(response.getBodyAsString).getOrElse("")
+      ))
       log.info(
         "{} {} {} -> {} [profile={}, caller={}]",
         if matched then "induced" else "no-match",
@@ -129,6 +154,7 @@ final class MockEngine(val mockPort: Int):
 
   def stop(): Unit =
     server.stop()
+    store.close()
     log.info("WireMock mock engine stopped")
 
   /** Register every behavior in a profile for (profile, caller). Each behavior is
@@ -238,6 +264,17 @@ final class MockEngine(val mockPort: Int):
         Registration(profile, caller, e.name, e.baseUrl, e.method, e.path, e.pathIsPattern, e.response, e.stub.getId.toString)
       }
     }
+
+  /** Every recorded data-plane request, newest first, from the persistent store
+    * (survives restarts). Control-plane (/__induction) calls are never recorded.
+    */
+  def serveEvents: List[RequestLogEntry] = store.all()
+
+  /** Clear the recorded request log (keeps registered behaviors). */
+  def clearRequests(): Unit =
+    store.clear()
+    server.resetRequests()
+    log.info("cleared request log")
 
 object MockEngine:
   /** A registered behavior plus the WireMock stub backing it (for removal). */

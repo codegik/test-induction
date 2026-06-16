@@ -29,11 +29,16 @@ COPY --from=build /build/target/universal/stage/ ./
 
 # The mock engine + /__induction control plane share this single port.
 ENV INDUCTION_MOCK_PORT=8080
+# Recorded requests are persisted here (H2). Mount a volume at /data to keep them.
+ENV INDUCTION_DB_PATH=/data/requests
 EXPOSE 8080
 
-# Run as an unprivileged user.
-RUN useradd --system --uid 1001 induction && chown -R induction:induction /app
+# Run as an unprivileged user; /data must be writable by it.
+RUN useradd --system --uid 1001 induction \
+ && mkdir -p /data \
+ && chown -R induction:induction /app /data
 USER induction
+VOLUME ["/data"]
 
 # Liveness: a TCP connect to the control/mock port (no curl in the JRE image).
 HEALTHCHECK --interval=15s --timeout=3s --start-period=30s --retries=3 \
